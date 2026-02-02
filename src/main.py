@@ -1,5 +1,6 @@
 """Entry point: load .env, start bot and scheduler."""
 import sys
+import traceback
 
 from src.config import ADMIN_USER_ID, validate
 from src.bot import create_bot
@@ -36,5 +37,13 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
-    sys.exit(0)
+    try:
+        main()
+        sys.exit(0)
+    except SystemExit as e:
+        if e.code and e.code != 0:
+            print(e, file=sys.stderr)
+        sys.exit(e.code if isinstance(e.code, int) else 1)
+    except Exception as e:
+        traceback.print_exc(file=sys.stderr)
+        sys.exit(1)

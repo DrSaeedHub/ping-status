@@ -100,9 +100,12 @@ After=network.target
 [Service]
 Type=simple
 WorkingDirectory=$INSTALL_DIR
+EnvironmentFile=-$INSTALL_DIR/.env
 ExecStart=$INSTALL_DIR/venv/bin/python -m src.main
 Restart=on-failure
 RestartSec=10
+StandardOutput=journal
+StandardError=journal
 
 [Install]
 WantedBy=default.target
