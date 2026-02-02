@@ -1,5 +1,6 @@
 """Job scheduler: check every 10s and run jobs when next_run (last_run + schedule) has passed."""
 from datetime import datetime, timedelta, timezone
+from html import escape
 from typing import Callable
 
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -39,7 +40,7 @@ def _run_job(job: dict, send_message: SendMessageFunc, admin_user_id: int) -> No
         count = int(job.get("count", 10))
         interval_sec = float(job.get("interval_sec", 0.2))
         if not target:
-            send_message(admin_user_id, f"Job '{name}': missing target.")
+            send_message(admin_user_id, f"⚠️ <b>Job skipped:</b> <code>{escape(str(name), quote=False)}</code>\nMissing target.")
             return
         result: PingResult = run_ping(target, count, interval_sec)
         text = format_report(name, result)
@@ -135,10 +136,10 @@ def run_job_now(
             return
         job = get_job_by_name(job_name)
         if not job:
-            send_message(admin_user_id, f"Job '{job_name}' not found.")
+            send_message(admin_user_id, f"❌ <b>Job not found:</b> <code>{escape(str(job_name), quote=False)}</code>")
             return
         if not skip_progress:
-            send_message(admin_user_id, f"Running job {job_name}…")
+            send_message(admin_user_id, f"▶️ <b>Running now:</b> <code>{escape(str(job_name), quote=False)}</code>")
         _run_job(job, send_message, admin_user_id)
     except Exception as e:
         send_error(e, f"scheduler: run_job_now name={job_name}")

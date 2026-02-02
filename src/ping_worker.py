@@ -2,6 +2,7 @@
 import re
 import subprocess
 from dataclasses import dataclass
+from html import escape
 from typing import Optional
 
 from src.error_reporting import send_error
@@ -145,18 +146,42 @@ def _parse_ping_output(
 
 
 def format_report(job_name: str, result: PingResult) -> str:
-    """Format a detailed report string for Telegram."""
+    """Format a detailed report string for Telegram (HTML)."""
+
+    def _h(value: object) -> str:
+        return escape(str(value), quote=False)
+
+    def _fmt_num(value: float, digits: int = 2) -> str:
+        return f"{value:.{digits}f}".rstrip("0").rstrip(".")
+
+    interval = _fmt_num(result.interval_sec, 3)
     lines = [
-        f"Ping report: {job_name}",
-        f"Target: {result.target}",
-        f"Count: {result.count} (interval {result.interval_sec}s)",
-        f"Transmitted: {result.transmitted}, Received: {result.received}",
-        f"Packet loss: {result.loss_pct:.1f}%",
+        f"<b>📡 Ping Report — {_h(job_name)}</b>",
+        "",
+        f"🎯 <b>Target:</b> {_h(result.target)}",
+        f"📦 <b>Test:</b> {result.count} packets (interval {interval}s)",
+        "",
+        "📊 <b>Results:</b>",
+        f"• <b>Sent:</b> {result.transmitted}",
+        f"• <b>Received:</b> {result.received}",
+        f"• <b>Packet Loss:</b> {result.loss_pct:.1f}%",
     ]
     if result.rtt_min_ms is not None and result.rtt_avg_ms is not None and result.rtt_max_ms is not None:
-        lines.append(f"RTT min/avg/max: {result.rtt_min_ms:.2f}/{result.rtt_avg_ms:.2f}/{result.rtt_max_ms:.2f} ms")
-    if result.raw_summary:
-        lines.append(result.raw_summary)
+        lines.extend(
+            [
+                "",
+                "⏱ <b>Latency (RTT):</b>",
+                f"• <b>Min:</b> {_fmt_num(result.rtt_min_ms)} ms",
+                f"• <b>Avg:</b> {_fmt_num(result.rtt_avg_ms)} ms",
+                f"• <b>Max:</b> {_fmt_num(result.rtt_max_ms)} ms",
+            ]
+        )
+        if result.rtt_mdev_ms is not None:
+            lines.append(f"• <b>Jitter:</b> {_fmt_num(result.rtt_mdev_ms)} ms")
+    elif result.raw_summary:
+        lines.extend(["", f"ℹ️ <b>Summary:</b> {_h(result.raw_summary)}"])
+    else:
+        lines.extend(["", "ℹ️ <b>Latency:</b> Not available"])
     if result.error:
-        lines.append(f"Note: {result.error}")
+        lines.extend(["", f"⚠️ <b>Note:</b> {_h(result.error)}"])
     return "\n".join(lines)

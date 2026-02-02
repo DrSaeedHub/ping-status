@@ -38,10 +38,12 @@ def main() -> None:
         run_job_now_callback=_run_job_now,
         get_next_run_times_callback=_get_next_times,
     )
+    def _send_html(chat_id: int, text: str) -> None:
+        bot.send_message(chat_id, text, parse_mode="HTML")
     global _send_message_func, _scheduler
-    _send_message_func = bot.send_message
+    _send_message_func = _send_html
     set_send_target(bot.send_message, admin_id)
-    _scheduler = start_scheduler(bot.send_message, admin_id)
+    _scheduler = start_scheduler(_send_message_func, admin_id)
     try:
         bot.infinity_polling()
     except KeyboardInterrupt:
