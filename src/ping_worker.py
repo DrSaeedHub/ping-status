@@ -4,6 +4,8 @@ import subprocess
 from dataclasses import dataclass
 from typing import Optional
 
+from src.error_reporting import send_error
+
 
 @dataclass
 class PingResult:
@@ -50,7 +52,8 @@ def run_ping(target: str, count: int, interval_sec: float) -> PingResult:
         )
         stdout = proc.stdout or ""
         stderr = proc.stderr or ""
-    except subprocess.TimeoutExpired:
+    except subprocess.TimeoutExpired as e:
+        send_error(e, "ping_worker: run_ping TimeoutExpired")
         return PingResult(
             target=target,
             count=count,
@@ -60,7 +63,8 @@ def run_ping(target: str, count: int, interval_sec: float) -> PingResult:
             loss_pct=100.0,
             error="Ping timed out",
         )
-    except FileNotFoundError:
+    except FileNotFoundError as e:
+        send_error(e, "ping_worker: run_ping FileNotFoundError")
         return PingResult(
             target=target,
             count=count,
@@ -71,6 +75,7 @@ def run_ping(target: str, count: int, interval_sec: float) -> PingResult:
             error="ping command not found",
         )
     except Exception as e:
+        send_error(e, "ping_worker: run_ping")
         return PingResult(
             target=target,
             count=count,

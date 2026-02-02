@@ -170,6 +170,7 @@ do_fresh() {
 
 # Option 3: Update
 do_update() {
+  stop_service
   install_system_deps
   cd "$INSTALL_DIR"
   if [ -d ".git" ]; then
@@ -180,7 +181,6 @@ do_update() {
     ensure_app
   fi
   install_python_deps
-  stop_service
   start_service
   echo "Update complete."
 }
@@ -197,8 +197,11 @@ do_uninstall() {
 # Main menu
 main() {
   if in_repo; then
-    INSTALL_DIR=$(cd "$(dirname "$0")" && pwd)
+    # Use current directory when run from repo (works for ./install.sh and bash <(curl) from repo dir)
+    INSTALL_DIR=$PWD
     cd "$INSTALL_DIR"
+  else
+    INSTALL_DIR="${INSTALL_DIR:-$HOME/ping-status}"
   fi
 
   echo "Ping Status"

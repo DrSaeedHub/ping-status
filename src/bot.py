@@ -13,6 +13,7 @@ from src.config import (
     get_env_path,
     mask_token,
 )
+from src.error_reporting import send_error
 from src.jobs_store import (
     add_job,
     delete_job,
@@ -37,9 +38,13 @@ def _delete_and_send(bot: telebot.TeleBot, chat_id: int, message_id: int, text: 
     """Delete the message and send a new one (clean chat)."""
     try:
         bot.delete_message(chat_id, message_id)
-    except Exception:
-        pass
-    bot.send_message(chat_id, text, reply_markup=reply_markup)
+    except Exception as e:
+        send_error(e, "bot: delete_message")
+    try:
+        bot.send_message(chat_id, text, reply_markup=reply_markup)
+    except Exception as e:
+        send_error(e, "bot: send_message in _delete_and_send")
+        raise
 
 
 def _main_menu_markup() -> InlineKeyboardMarkup:
@@ -60,11 +65,13 @@ def _format_run_time(dt_or_iso: datetime | str | None) -> str:
         try:
             s = dt_or_iso.replace("Z", "+00:00")
             dt_or_iso = datetime.fromisoformat(s)
-        except (ValueError, TypeError):
+        except (ValueError, TypeError) as e:
+            send_error(e, "bot: _format_run_time fromisoformat")
             return "—"
     try:
         return dt_or_iso.strftime("%d %b %H:%M")
-    except (ValueError, TypeError):
+    except (ValueError, TypeError) as e:
+        send_error(e, "bot: _format_run_time strftime")
         return "—"
 
 
@@ -123,8 +130,8 @@ def _config_text() -> str:
         from src import config as config_module
         lines.append(f"PING_DEFAULT_INTERVAL: {config_module.PING_DEFAULT_INTERVAL}")
         lines.append(f"PING_DEFAULT_COUNT: {config_module.PING_DEFAULT_COUNT}")
-    except Exception:
-        pass
+    except Exception as e:
+        send_error(e, "bot: _config_text config_module")
     return "\n".join(lines)
 
 
@@ -171,13 +178,13 @@ def _update_env_key(key: str, value: str) -> None:
         if key == "PING_DEFAULT_INTERVAL":
             try:
                 config_module.PING_DEFAULT_INTERVAL = float(value)
-            except ValueError:
-                pass
+            except ValueError as e:
+                send_error(e, "bot: _update_env_key PING_DEFAULT_INTERVAL (new file)")
         elif key == "PING_DEFAULT_COUNT":
             try:
                 config_module.PING_DEFAULT_COUNT = int(value)
-            except ValueError:
-                pass
+            except ValueError as e:
+                send_error(e, "bot: _update_env_key PING_DEFAULT_COUNT (new file)")
         return
     content = path.read_text(encoding="utf-8")
     lines = content.splitlines()
@@ -199,13 +206,13 @@ def _update_env_key(key: str, value: str) -> None:
     if key == "PING_DEFAULT_INTERVAL":
         try:
             config_module.PING_DEFAULT_INTERVAL = float(value)
-        except ValueError:
-            pass
+        except ValueError as e:
+            send_error(e, "bot: _update_env_key PING_DEFAULT_INTERVAL")
     elif key == "PING_DEFAULT_COUNT":
         try:
             config_module.PING_DEFAULT_COUNT = int(value)
-        except ValueError:
-            pass
+        except ValueError as e:
+            send_error(e, "bot: _update_env_key PING_DEFAULT_COUNT")
 
 
 def create_bot(
@@ -246,8 +253,8 @@ def create_bot(
         if not _is_admin(c.from_user.id):
             try:
                 bot.answer_callback_query(c.id, "Unauthorized")
-            except Exception:
-                pass
+            except Exception as e:
+                send_error(e, "bot: answer_callback_query Unauthorized")
             return
         chat_id = c.message.chat.id
         msg_id = c.message.message_id
@@ -302,8 +309,8 @@ def create_bot(
             job_name = data[8:].strip()
             try:
                 bot.answer_callback_query(c.id, "Running job…")
-            except Exception:
-                pass
+            except Exception as e:
+                send_error(e, "bot: answer_callback_query Running job")
             bot.send_message(chat_id, f"Running job {job_name}…")
             if run_job_now_callback:
                 def _run():
@@ -332,8 +339,8 @@ def create_bot(
                     reloader = get_scheduler_reloader()
                     if reloader:
                         reloader()
-                except Exception:
-                    pass
+                except Exception as e:
+                    send_error(e, "bot: get_scheduler_reloader after del_yes")
             return
 
         # Config set
@@ -348,8 +355,8 @@ def create_bot(
 
         try:
             bot.answer_callback_query(c.id)
-        except Exception:
-            pass
+        except Exception as e:
+            send_error(e, "bot: answer_callback_query")
 
     @bot.message_handler(func=lambda m: True)
     def on_message(msg):
@@ -382,7 +389,8 @@ def create_bot(
                     iv = float(text)
                     if iv <= 0 or iv > 3600:
                         raise ValueError("out of range")
-                except ValueError:
+                except ValueError as e:
+                    send_error(e, "bot: add job interval")
                     bot.reply_to(msg, "Send a positive number (e.g. 0.01 or 0.2):")
                     return
                 _set_state(chat_id, {**state, "step": "count", "interval_sec": iv})
@@ -393,7 +401,8 @@ def create_bot(
                     cnt = int(text)
                     if cnt < 1 or cnt > 100000:
                         raise ValueError("out of range")
-                except ValueError:
+                except ValueError as e:
+                    send_error(e, "bot: add job count")
                     bot.reply_to(msg, "Send a positive integer (1–100000):")
                     return
                 _set_state(chat_id, {**state, "step": "schedule", "count": cnt})
@@ -404,7 +413,8 @@ def create_bot(
                     sched = int(text)
                     if sched < 1 or sched > 10080:  # max 1 week
                         raise ValueError("out of range")
-                except ValueError:
+                except ValueError as e:
+                    send_error(e, "bot: add job schedule")
                     bot.reply_to(msg, "Send a positive integer (minutes, 1–10080):")
                     return
                 job = {
@@ -416,15 +426,20 @@ def create_bot(
                 }
                 if add_job(job):
                     _clear_state(chat_id)
-                    bot.reply_to(msg, f"Job '{job['name']}' added.")
+                    bot.reply_to(msg, f"Job '{job['name']}' added. Running once…")
+                    if run_job_now_callback:
+                        def _run_new_job():
+                            run_job_now_callback(job["name"])
+                        t = threading.Thread(target=_run_new_job, daemon=True)
+                        t.start()
                     if send_message_callback:
                         try:
                             from src.main import get_scheduler_reloader
                             r = get_scheduler_reloader()
                             if r:
                                 r()
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            send_error(e, "bot: get_scheduler_reloader after add_job")
                     text2, mk = _jobs_list_with_times()
                     bot.send_message(chat_id, text2, reply_markup=mk)
                 else:
@@ -447,7 +462,8 @@ def create_bot(
                     val = float(text)
                     if val <= 0 or val > 3600:
                         raise ValueError()
-                except ValueError:
+                except ValueError as e:
+                    send_error(e, "bot: edit field interval_sec")
                     bot.reply_to(msg, "Send a positive number (e.g. 0.01):")
                     return
             elif field == "count":
@@ -455,7 +471,8 @@ def create_bot(
                     val = int(text)
                     if val < 1 or val > 100000:
                         raise ValueError()
-                except ValueError:
+                except ValueError as e:
+                    send_error(e, "bot: edit field count")
                     bot.reply_to(msg, "Send an integer 1–100000:")
                     return
             elif field == "schedule_minutes":
@@ -463,7 +480,8 @@ def create_bot(
                     val = int(text)
                     if val < 1 or val > 10080:
                         raise ValueError()
-                except ValueError:
+                except ValueError as e:
+                    send_error(e, "bot: edit field schedule_minutes")
                     bot.reply_to(msg, "Send minutes (1–10080):")
                     return
             else:
@@ -480,8 +498,8 @@ def create_bot(
                     r = get_scheduler_reloader()
                     if r:
                         r()
-                except Exception:
-                    pass
+                except Exception as e:
+                    send_error(e, "bot: get_scheduler_reloader after update_job")
             text2, mk = _jobs_list_with_times()
             bot.send_message(chat_id, text2, reply_markup=mk)
             return
@@ -492,13 +510,15 @@ def create_bot(
             if key == "PING_DEFAULT_INTERVAL":
                 try:
                     float(text)
-                except ValueError:
+                except ValueError as e:
+                    send_error(e, "bot: cfg PING_DEFAULT_INTERVAL")
                     bot.reply_to(msg, "Send a number (e.g. 0.2):")
                     return
             elif key == "PING_DEFAULT_COUNT":
                 try:
                     int(text)
-                except ValueError:
+                except ValueError as e:
+                    send_error(e, "bot: cfg PING_DEFAULT_COUNT")
                     bot.reply_to(msg, "Send an integer (e.g. 10):")
                     return
             _update_env_key(key, text)

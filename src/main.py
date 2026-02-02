@@ -4,6 +4,7 @@ import traceback
 
 from src.config import ADMIN_USER_ID, validate
 from src.bot import create_bot
+from src.error_reporting import send_error, set_send_target
 from src.scheduler import get_next_run_times, reload_scheduler, run_job_now, start_scheduler
 
 _scheduler = None
@@ -26,7 +27,7 @@ def main() -> None:
     admin_id = int(ADMIN_USER_ID)
 
     def _get_next_times():
-        return get_next_run_times(_scheduler) if _scheduler else {}
+        return get_next_run_times()
 
     def _run_job_now(name: str):
         if _scheduler and _send_message_func:
@@ -39,11 +40,15 @@ def main() -> None:
     )
     global _send_message_func, _scheduler
     _send_message_func = bot.send_message
+    set_send_target(bot.send_message, admin_id)
     _scheduler = start_scheduler(bot.send_message, admin_id)
     try:
         bot.infinity_polling()
     except KeyboardInterrupt:
         pass
+    except Exception as e:
+        send_error(e, "main: infinity_polling")
+        raise
     finally:
         if _scheduler:
             _scheduler.shutdown(wait=False)
@@ -58,5 +63,6 @@ if __name__ == "__main__":
             print(e, file=sys.stderr)
         sys.exit(e.code if isinstance(e.code, int) else 1)
     except Exception as e:
+        send_error(e, "main: uncaught")
         traceback.print_exc(file=sys.stderr)
         sys.exit(1)

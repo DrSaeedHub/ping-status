@@ -4,6 +4,8 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
+from src.error_reporting import send_error
+
 # Resolve project root (directory containing src/)
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 _ENV_PATH = _PROJECT_ROOT / ".env"
@@ -20,14 +22,16 @@ def _get(key: str, default: str | None = None) -> str:
 def _get_int(key: str, default: int) -> int:
     try:
         return int(_get(key) or default)
-    except ValueError:
+    except ValueError as e:
+        send_error(e, "config: _get_int")
         return default
 
 
 def _get_float(key: str, default: float) -> float:
     try:
         return float(_get(key) or default)
-    except ValueError:
+    except ValueError as e:
+        send_error(e, "config: _get_float")
         return default
 
 
@@ -41,7 +45,8 @@ def validate() -> None:
         raise SystemExit("Missing ADMIN_USER_ID in .env")
     try:
         int(admin)
-    except ValueError:
+    except ValueError as e:
+        send_error(e, "config: validate ADMIN_USER_ID")
         raise SystemExit("ADMIN_USER_ID must be a numeric Telegram user ID")
 
 

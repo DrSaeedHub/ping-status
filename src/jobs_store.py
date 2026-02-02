@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from src.config import get_jobs_path
+from src.error_reporting import send_error
 
 _LOCK = threading.Lock()
 
@@ -12,26 +13,37 @@ JOBS_KEY = "jobs"
 
 
 def _ensure_file(path: Path) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    if not path.exists():
-        path.write_text(json.dumps({JOBS_KEY: []}, indent=2), encoding="utf-8")
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if not path.exists():
+            path.write_text(json.dumps({JOBS_KEY: []}, indent=2), encoding="utf-8")
+    except Exception as e:
+        send_error(e, "jobs_store: _ensure_file")
 
 
 def load_jobs() -> list[dict[str, Any]]:
     """Load jobs list from disk. Returns list of job dicts."""
     path = get_jobs_path()
     with _LOCK:
-        _ensure_file(path)
-        data = json.loads(path.read_text(encoding="utf-8"))
-        return data.get(JOBS_KEY, [])
+        try:
+            _ensure_file(path)
+            data = json.loads(path.read_text(encoding="utf-8"))
+            return data.get(JOBS_KEY, [])
+        except Exception as e:
+            send_error(e, "jobs_store: load_jobs")
+            return []
 
 
 def save_jobs(jobs: list[dict[str, Any]]) -> None:
     """Write jobs list to disk."""
     path = get_jobs_path()
     with _LOCK:
-        _ensure_file(path)
-        path.write_text(json.dumps({JOBS_KEY: jobs}, indent=2), encoding="utf-8")
+        try:
+            _ensure_file(path)
+            path.write_text(json.dumps({JOBS_KEY: jobs}, indent=2), encoding="utf-8")
+        except Exception as e:
+            send_error(e, "jobs_store: save_jobs")
+            raise
 
 
 def get_job_by_name(name: str) -> dict[str, Any] | None:
