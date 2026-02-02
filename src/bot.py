@@ -1,6 +1,8 @@
 """Telegram bot: inline-only keyboards, delete-then-send on button click, job CRUD, config."""
 import re
 import threading
+from datetime import datetime
+from typing import Callable
 
 import telebot
 from telebot.types import InlineKeyboardButton, InlineKeyboardMarkup
@@ -50,8 +52,25 @@ def _main_menu_markup() -> InlineKeyboardMarkup:
     return m
 
 
-def _jobs_list_markup() -> tuple[str, InlineKeyboardMarkup]:
+def _format_run_time(dt_or_iso: datetime | str | None) -> str:
+    """Format datetime or ISO string for display; return '—' if missing."""
+    if dt_or_iso is None:
+        return "—"
+    if isinstance(dt_or_iso, str):
+        try:
+            s = dt_or_iso.replace("Z", "+00:00")
+            dt_or_iso = datetime.fromisoformat(s)
+        except (ValueError, TypeError):
+            return "—"
+    try:
+        return dt_or_iso.strftime("%d %b %H:%M")
+    except (ValueError, TypeError):
+        return "—"
+
+
+def _jobs_list_markup(next_run_times: dict | None = None) -> tuple[str, InlineKeyboardMarkup]:
     jobs = load_jobs()
+    next_run_times = next_run_times or {}
     lines = ["Ping jobs:\n"] if jobs else ["No jobs yet.\n"]
     for j in jobs:
         name = j.get("name", "?")
@@ -59,16 +78,23 @@ def _jobs_list_markup() -> tuple[str, InlineKeyboardMarkup]:
         interval = j.get("interval_sec", "?")
         count = j.get("count", "?")
         sched = j.get("schedule_minutes", "?")
-        lines.append(f"• {name}: {target} (-i {interval} -c {count}) every {sched} min")
+        last_run = _format_run_time(j.get("last_run_at"))
+        next_run = _format_run_time(next_run_times.get(name))
+        lines.append(
+            f"• {name}: {target} (-i {interval} -c {count}) every {sched} min\n"
+            f"  last: {last_run}  next: {next_run}"
+        )
     text = "\n".join(lines)
     m = InlineKeyboardMarkup()
     for j in jobs:
         name = j.get("name", "?")
         cb_edit = f"job_edit:{name}"[:CB_MAX]
         cb_del = f"job_del:{name}"[:CB_MAX]
+        cb_run = f"job_run:{name}"[:CB_MAX]
         m.row(
-            InlineKeyboardButton(f"Edit {name}", callback_data=cb_edit),
-            InlineKeyboardButton(f"Delete {name}", callback_data=cb_del),
+            InlineKeyboardButton("Run now", callback_data=cb_run),
+            InlineKeyboardButton(f"Edit", callback_data=cb_edit),
+            InlineKeyboardButton(f"Del", callback_data=cb_del),
         )
     m.row(InlineKeyboardButton("Add job", callback_data="job_add"))
     m.row(InlineKeyboardButton("Back", callback_data="menu_main"))
@@ -182,12 +208,24 @@ def _update_env_key(key: str, value: str) -> None:
             pass
 
 
-def create_bot(send_message_callback=None):
+def create_bot(
+    send_message_callback=None,
+    run_job_now_callback: Callable[[str], None] | None = None,
+    get_next_run_times_callback: Callable[[], dict] | None = None,
+):
     """
     Create and configure the TeleBot. send_message_callback(chat_id, text) is used
     by the scheduler to send ping reports; if None, bot.send_message is used.
+    run_job_now_callback(name) runs a job once (called from "Run now").
+    get_next_run_times_callback() returns {job_name: next_run_time} for the jobs list.
     """
     bot = telebot.TeleBot(BOT_TOKEN)
+
+    def _get_next_times() -> dict:
+        return get_next_run_times_callback() if get_next_run_times_callback else {}
+
+    def _jobs_list_with_times():
+        return _jobs_list_markup(_get_next_times())
 
     def send_to_admin(text: str) -> None:
         if send_message_callback:
@@ -220,7 +258,7 @@ def create_bot(send_message_callback=None):
             _delete_and_send(bot, chat_id, msg_id, "Choose an option:", _main_menu_markup())
             return
         if data == "menu_jobs":
-            text, mk = _jobs_list_markup()
+            text, mk = _jobs_list_with_times()
             _delete_and_send(bot, chat_id, msg_id, text, mk)
             return
         if data == "menu_cfg":
@@ -251,7 +289,7 @@ def create_bot(send_message_callback=None):
         if data.startswith("editfield:"):
             parts = data.split(":", 2)
             if len(parts) < 3:
-                text, mk = _jobs_list_markup()
+                text, mk = _jobs_list_with_times()
                 _delete_and_send(bot, chat_id, msg_id, text, mk)
                 return
             job_name, field = parts[1], parts[2]
@@ -260,6 +298,19 @@ def create_bot(send_message_callback=None):
             return
 
         # Delete job: confirm
+        if data.startswith("job_run:"):
+            job_name = data[8:].strip()
+            try:
+                bot.answer_callback_query(c.id, "Running job…")
+            except Exception:
+                pass
+            bot.send_message(chat_id, f"Running job {job_name}…")
+            if run_job_now_callback:
+                def _run():
+                    run_job_now_callback(job_name)
+                t = threading.Thread(target=_run, daemon=True)
+                t.start()
+            return
         if data.startswith("job_del:"):
             job_name = data[8:].strip()
             _set_state(chat_id, {"flow": "del_confirm", "job_name": job_name})
@@ -374,7 +425,7 @@ def create_bot(send_message_callback=None):
                                 r()
                         except Exception:
                             pass
-                    text2, mk = _jobs_list_markup()
+                    text2, mk = _jobs_list_with_times()
                     bot.send_message(chat_id, text2, reply_markup=mk)
                 else:
                     bot.reply_to(msg, "Failed to add job (name may already exist).")
@@ -417,7 +468,7 @@ def create_bot(send_message_callback=None):
                     return
             else:
                 _clear_state(chat_id)
-                text2, mk = _jobs_list_markup()
+                text2, mk = _jobs_list_with_times()
                 bot.send_message(chat_id, text2, reply_markup=mk)
                 return
             update_job(job_name, {field: val})
@@ -431,7 +482,7 @@ def create_bot(send_message_callback=None):
                         r()
                 except Exception:
                     pass
-            text2, mk = _jobs_list_markup()
+            text2, mk = _jobs_list_with_times()
             bot.send_message(chat_id, text2, reply_markup=mk)
             return
 

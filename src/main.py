@@ -4,7 +4,7 @@ import traceback
 
 from src.config import ADMIN_USER_ID, validate
 from src.bot import create_bot
-from src.scheduler import reload_scheduler, start_scheduler
+from src.scheduler import get_next_run_times, reload_scheduler, run_job_now, start_scheduler
 
 _scheduler = None
 _send_message_func = None
@@ -23,10 +23,23 @@ def get_scheduler_reloader():
 
 def main() -> None:
     validate()
-    bot, _ = create_bot(send_message_callback=None)
+    admin_id = int(ADMIN_USER_ID)
+
+    def _get_next_times():
+        return get_next_run_times(_scheduler) if _scheduler else {}
+
+    def _run_job_now(name: str):
+        if _scheduler and _send_message_func:
+            run_job_now(_scheduler, name, _send_message_func, admin_id, skip_progress=True)
+
+    bot, _ = create_bot(
+        send_message_callback=None,
+        run_job_now_callback=_run_job_now,
+        get_next_run_times_callback=_get_next_times,
+    )
     global _send_message_func, _scheduler
     _send_message_func = bot.send_message
-    _scheduler = start_scheduler(bot.send_message, int(ADMIN_USER_ID))
+    _scheduler = start_scheduler(bot.send_message, admin_id)
     try:
         bot.infinity_polling()
     except KeyboardInterrupt:

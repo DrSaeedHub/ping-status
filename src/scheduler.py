@@ -1,11 +1,12 @@
 """Job scheduler: run ping jobs every N minutes and send report to admin."""
 import threading
+from datetime import datetime, timezone
 from typing import Callable
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 
-from src.jobs_store import load_jobs
+from src.jobs_store import load_jobs, update_job
 from src.ping_worker import PingResult, format_report, run_ping
 
 # Callback: (admin_user_id: int, text: str) -> None
@@ -24,6 +25,7 @@ def _run_job(job: dict, send_message: SendMessageFunc, admin_user_id: int) -> No
     result: PingResult = run_ping(target, count, interval_sec)
     text = format_report(name, result)
     send_message(admin_user_id, text)
+    update_job(name, {"last_run_at": datetime.now(timezone.utc).isoformat()})
 
 
 def start_scheduler(send_message: SendMessageFunc, admin_user_id: int) -> BackgroundScheduler:
@@ -75,3 +77,38 @@ def reload_scheduler(
             args=[job, send_message, admin_user_id],
             replace_existing=True,
         )
+
+
+def get_next_run_times(scheduler: BackgroundScheduler | None) -> dict[str, datetime]:
+    """Return {job_name: next_run_time} for all scheduled jobs. Times are timezone-aware."""
+    if not scheduler:
+        return {}
+    out: dict[str, datetime] = {}
+    for j in scheduler.get_jobs():
+        if j.id and j.id.startswith("ping_"):
+            name = j.id[5:]
+            if j.next_run_time:
+                out[name] = j.next_run_time
+    return out
+
+
+def run_job_now(
+    scheduler: BackgroundScheduler | None,
+    job_name: str,
+    send_message: SendMessageFunc,
+    admin_user_id: int,
+    *,
+    skip_progress: bool = False,
+) -> None:
+    """Run one job immediately: optionally send progress message, then run ping and send report."""
+    from src.jobs_store import get_job_by_name
+
+    if not scheduler or not send_message:
+        return
+    job = get_job_by_name(job_name)
+    if not job:
+        send_message(admin_user_id, f"Job '{job_name}' not found.")
+        return
+    if not skip_progress:
+        send_message(admin_user_id, f"Running job {job_name}…")
+    _run_job(job, send_message, admin_user_id)
