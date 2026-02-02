@@ -313,8 +313,8 @@ def create_bot(send_message_callback=None):
         if state and state.get("flow") == "addjob":
             step = state.get("step", "name")
             if step == "name":
-                if not re.match(r"^[a-zA-Z0-9_-]+$", text) or len(text) > 32:
-                    bot.reply_to(msg, "Invalid name. Use letters, numbers, _ or -. Max 32 chars.")
+                if not re.match(r"^[a-zA-Z0-9_. -]+$", text) or len(text) > 32:
+                    bot.reply_to(msg, "Invalid name. Use letters, numbers, _ - . or space. Max 32 chars.")
                     return
                 if get_job_by_name(text):
                     bot.reply_to(msg, "A job with this name already exists.")
